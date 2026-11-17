@@ -1,4 +1,4 @@
-import { createFileRoute, useNavigate, Link } from "@tanstack/react-router";
+import { createFileRoute, useNavigate, Link, useRouterState } from "@tanstack/react-router";
 import { useEffect, useState } from "react";
 import { useAuth } from "@/lib/auth-context";
 import { lovable } from "@/integrations/lovable";
@@ -12,6 +12,7 @@ import { toast } from "sonner";
 import { Dumbbell } from "lucide-react";
 import { useTenant } from "@/lib/tenant-context";
 import { firstAccessDestination } from "@/lib/access-destination";
+import { currentSaasPlan, rememberSaasPlan } from "@/lib/stripe";
 
 export const Route = createFileRoute("/entrar")({ component: Entrar, head: () => ({ meta: [
   { title: "Entrar — Gym Spotter" },
@@ -25,6 +26,11 @@ export const Route = createFileRoute("/entrar")({ component: Entrar, head: () =>
 function Entrar() {
   const { user, loading, signIn, signUp } = useAuth();
   const navigate = useNavigate();
+  const requestedPlan = useRouterState({ select: s => {
+    const value = new URLSearchParams(s.location.searchStr).get("plano");
+    return value === "starter" || value === "pro" || value === "premium" ? value : undefined;
+  } });
+  const plano = requestedPlan ?? currentSaasPlan();
   const { tenant, loading: tenantLoading, error: tenantError, refetch } = useTenant();
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
@@ -33,8 +39,10 @@ function Entrar() {
 
   useEffect(() => {
     const destination = firstAccessDestination({ authenticated: !!user, authLoading: loading, tenantLoading, tenantError, tenant });
-    if (destination) navigate({ to: destination, replace: true });
-  }, [user, loading, tenantLoading, tenantError, tenant, navigate]);
+    if (!destination) return;
+    if (plano) rememberSaasPlan(plano);
+    navigate({ to: destination, replace: true });
+  }, [user, loading, tenantLoading, tenantError, tenant, navigate, plano]);
 
   const onLogin = async (e: React.FormEvent) => {
     e.preventDefault(); setBusy(true);
@@ -54,7 +62,12 @@ function Entrar() {
 
   const onGoogle = async () => {
     setBusy(true);
-    const result = await lovable.auth.signInWithOAuth("google", { redirect_uri: window.location.origin + "/entrar" });
+    const host = window.location.hostname;
+    const local = host === "localhost" || host === "127.0.0.1";
+    const redirectUri = local
+      ? `http://127.0.0.1:${window.location.port || "80"}/iframe-oauth/callback`
+      : `${window.location.origin}/entrar`;
+    const result = await lovable.auth.signInWithOAuth("google", { redirect_uri: redirectUri });
     if (result.error) { toast.error(result.error.message ?? "Falha no login com Google"); setBusy(false); return; }
     if (result.redirected) return;
     setBusy(false);

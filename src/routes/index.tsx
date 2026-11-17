@@ -2,6 +2,7 @@ import { createFileRoute, Link } from "@tanstack/react-router";
 import { Check, Dumbbell, Users, DollarSign, Calendar, UserPlus, BarChart, Globe, ArrowRight } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Accordion, AccordionContent, AccordionItem, AccordionTrigger } from "@/components/ui/accordion";
+import { rememberSaasPlan } from "@/lib/stripe";
 
 export const Route = createFileRoute("/")({
   component: Landing,
@@ -24,10 +25,10 @@ const recursos = [
   { icon: Globe, t: "Link público da academia", d: "Apresente os planos disponíveis e receba solicitações de aula experimental." },
 ];
 
-const planos = [
-  { n: "Start", p: "97", d: "Ideal para estúdios.", f: ["Gestão de até 50 alunos", "Agenda"], checkout: "https://pay.kiwify.com.br/gNqK4eC" },
-  { n: "Pro", p: "197", d: "O mais popular", destaque: true, f: ["Alunos ilimitados", "Financeiro completo", "Suporte prioritário"], checkout: "https://pay.kiwify.com.br/HHpoAGt" },
-  { n: "Elite", p: "397", d: "Para redes de academias.", f: ["Múltiplas unidades", "Relatórios avançados"], checkout: "https://pay.kiwify.com.br/zbICqSC" },
+const planos: { n: string; code: "starter" | "pro" | "premium"; p: string; d: string; destaque?: boolean; f: string[] }[] = [
+  { n: "Start", code: "starter", p: "97", d: "Ideal para estúdios.", f: ["Gestão de até 50 alunos", "Agenda"] },
+  { n: "Pro", code: "pro", p: "197", d: "O mais popular", destaque: true, f: ["Alunos ilimitados", "Financeiro completo", "Suporte prioritário"] },
+  { n: "Elite", code: "premium", p: "397", d: "Para redes de academias.", f: ["Múltiplas unidades", "Relatórios avançados"] },
 ];
 
 const passos = [
@@ -121,7 +122,7 @@ function Landing() {
                     <li key={x} className="flex items-start gap-2 text-sm"><Check className="h-4 w-4 mt-0.5 shrink-0 text-primary" />{x}</li>
                   ))}
                 </ul>
-                <Button asChild variant={pl.destaque ? "default" : "outline"} className="mt-6 w-full font-bold"><a href={pl.checkout} target="_blank" rel="noopener noreferrer">Assinar Agora</a></Button>
+                <Button asChild variant={pl.destaque ? "default" : "outline"} className="mt-6 w-full font-bold"><a href={`/entrar?plano=${pl.code}`} onClick={() => rememberSaasPlan(pl.code)}>Assinar Agora</a></Button>
               </div>
             ))}
           </div>

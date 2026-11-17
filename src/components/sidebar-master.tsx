@@ -6,7 +6,7 @@ import { useAuth } from "@/lib/auth-context";
 const items = [
   { title: "Painel", url: "/master/painel", icon: BarChart3 },
   { title: "Academias", url: "/master/listaAcademias", icon: Building2 },
-  { title: "Assinaturas Kiwify", url: "/master/assinaturas", icon: CreditCard },
+  { title: "Assinaturas", url: "/master/assinaturas", icon: CreditCard },
   { title: "Nova academia", url: "/master/novaAcademia", icon: PlusSquare },
   { title: "Configuracoes do sistema", url: "/master/configuracoes", icon: Settings },
 ];

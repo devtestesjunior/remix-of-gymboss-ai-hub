@@ -11,6 +11,9 @@ import { toast } from "sonner";
 import { Check } from "lucide-react";
 import { accessDestination } from "@/lib/access-destination";
 import { completeOnboarding, validateOnboarding, type OnboardingProgress } from "@/lib/onboarding-setup";
+import { openStripeBilling } from "@/lib/stripe.functions";
+import { currentSaasPlan, forgetSaasPlan } from "@/lib/stripe";
+import { useServerFn } from "@tanstack/react-start";
 
 export const Route = createFileRoute("/app/onboarding")({ component: Onboarding, head: () => ({ meta: [{"title": "Primeiro acesso · Academia | Gym Spotter"}, {"name": "description", "content": "Primeiro acesso — Gym Spotter, gestão de academias."}, {"property": "og:title", "content": "Primeiro acesso · Academia | Gym Spotter"}, {"property": "og:description", "content": "Primeiro acesso — Gym Spotter, gestão de academias."}, {"property": "og:type", "content": "website"}, {"name": "twitter:card", "content": "summary"}] }) });
 
@@ -20,6 +23,7 @@ function Onboarding() {
   const { user } = useAuth();
   const { tenant, loading: tenantLoading, error: tenantError, refetch } = useTenant();
   const navigate = useNavigate();
+  const openBilling = useServerFn(openStripeBilling);
   const [step, setStep] = useState(0);
   const [busy, setBusy] = useState(false);
   const [setupError, setSetupError] = useState<string | null>(null);
@@ -85,6 +89,17 @@ function Onboarding() {
       const result = await refetch();
       if (result.error || !result.data?.academyId) throw new Error("Configuração salva, mas não foi possível confirmar seu acesso. Tente novamente; os cadastros já salvos não serão repetidos.");
       toast.success("Academia criada!");
+      const plano = currentSaasPlan();
+      if (plano) {
+        forgetSaasPlan();
+        try {
+          const billing = await openBilling({ data: { academyId: result.data.academyId, plan: plano, intent: "subscribe" } });
+          window.location.assign(billing.url);
+          return;
+        } catch {
+          toast.error("Academia criada, mas a cobrança não abriu.");
+        }
+      }
       navigate({ to: "/app/dashboard", replace: true });
     } catch (e: unknown) {
       const message = e instanceof Error ? e.message : "Não foi possível concluir a configuração. Tente novamente.";

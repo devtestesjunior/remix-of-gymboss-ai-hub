@@ -408,6 +408,209 @@ export type Database = {
           },
         ]
       }
+      stripe_customer: {
+        Row: {
+          academy_id: string
+          created_at: string
+          customer_id: string
+        }
+        Insert: {
+          academy_id: string
+          created_at?: string
+          customer_id: string
+        }
+        Update: {
+          academy_id?: string
+          created_at?: string
+          customer_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "stripe_customer_academy_id_fkey"
+            columns: ["academy_id"]
+            isOneToOne: true
+            referencedRelation: "academy"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      stripe_event: {
+        Row: {
+          access_until: string | null
+          amount: number | null
+          applied_at: string | null
+          charge_id: string | null
+          currency: string | null
+          customer_email: string | null
+          event_type: string
+          id: string
+          identity: string
+          invoice_id: string | null
+          invoice_status: string | null
+          livemode: boolean
+          plan: Database["public"]["Enums"]["academy_plan"] | null
+          price_id: string | null
+          reason: string | null
+          received_at: string
+          state: string
+          subscription_id: string | null
+        }
+        Insert: {
+          access_until?: string | null
+          amount?: number | null
+          applied_at?: string | null
+          charge_id?: string | null
+          currency?: string | null
+          customer_email?: string | null
+          event_type: string
+          id?: string
+          identity: string
+          invoice_id?: string | null
+          invoice_status?: string | null
+          livemode: boolean
+          plan?: Database["public"]["Enums"]["academy_plan"] | null
+          price_id?: string | null
+          reason?: string | null
+          received_at?: string
+          state?: string
+          subscription_id?: string | null
+        }
+        Update: {
+          access_until?: string | null
+          amount?: number | null
+          applied_at?: string | null
+          charge_id?: string | null
+          currency?: string | null
+          customer_email?: string | null
+          event_type?: string
+          id?: string
+          identity?: string
+          invoice_id?: string | null
+          invoice_status?: string | null
+          livemode?: boolean
+          plan?: Database["public"]["Enums"]["academy_plan"] | null
+          price_id?: string | null
+          reason?: string | null
+          received_at?: string
+          state?: string
+          subscription_id?: string | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "stripe_event_subscription_id_fkey"
+            columns: ["subscription_id"]
+            isOneToOne: false
+            referencedRelation: "stripe_subscription"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      stripe_invoice: {
+        Row: {
+          amount: number | null
+          charge_id: string | null
+          created_at: string
+          currency: string | null
+          id: string
+          period_end: string | null
+          status: string | null
+          subscription_id: string | null
+        }
+        Insert: {
+          amount?: number | null
+          charge_id?: string | null
+          created_at?: string
+          currency?: string | null
+          id: string
+          period_end?: string | null
+          status?: string | null
+          subscription_id?: string | null
+        }
+        Update: {
+          amount?: number | null
+          charge_id?: string | null
+          created_at?: string
+          currency?: string | null
+          id?: string
+          period_end?: string | null
+          status?: string | null
+          subscription_id?: string | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "stripe_invoice_subscription_id_fkey"
+            columns: ["subscription_id"]
+            isOneToOne: false
+            referencedRelation: "stripe_subscription"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      stripe_subscription: {
+        Row: {
+          academy_id: string | null
+          access_until: string | null
+          created_at: string
+          customer_email: string
+          customer_id: string | null
+          id: string
+          last_paid_until: string | null
+          livemode: boolean
+          manual_binding: boolean
+          plan: Database["public"]["Enums"]["academy_plan"] | null
+          price_id: string | null
+          reviewed_at: string | null
+          reviewed_by: string | null
+          state: string
+          updated_at: string
+          verified: boolean
+        }
+        Insert: {
+          academy_id?: string | null
+          access_until?: string | null
+          created_at?: string
+          customer_email: string
+          customer_id?: string | null
+          id: string
+          last_paid_until?: string | null
+          livemode: boolean
+          manual_binding?: boolean
+          plan?: Database["public"]["Enums"]["academy_plan"] | null
+          price_id?: string | null
+          reviewed_at?: string | null
+          reviewed_by?: string | null
+          state?: string
+          updated_at?: string
+          verified?: boolean
+        }
+        Update: {
+          academy_id?: string | null
+          access_until?: string | null
+          created_at?: string
+          customer_email?: string
+          customer_id?: string | null
+          id?: string
+          last_paid_until?: string | null
+          livemode?: boolean
+          manual_binding?: boolean
+          plan?: Database["public"]["Enums"]["academy_plan"] | null
+          price_id?: string | null
+          reviewed_at?: string | null
+          reviewed_by?: string | null
+          state?: string
+          updated_at?: string
+          verified?: boolean
+        }
+        Relationships: [
+          {
+            foreignKeyName: "stripe_subscription_academy_id_fkey"
+            columns: ["academy_id"]
+            isOneToOne: false
+            referencedRelation: "academy"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       lead: {
         Row: {
           academy_id: string
@@ -788,6 +991,16 @@ export type Database = {
       kiwify_candidates: { Args: { p_email: string }; Returns: string[] }
       kiwify_process_event: { Args: { p_event: Json }; Returns: Json }
       kiwify_resolve: {
+        Args: { p_academy: string; p_actor: string; p_subscription: string }
+        Returns: undefined
+      }
+      stripe_access_allowed: { Args: { p_academy: string }; Returns: boolean }
+      stripe_bind_customer: {
+        Args: { p_academy: string; p_actor: string; p_customer: string }
+        Returns: string
+      }
+      stripe_process_event: { Args: { p_event: Json }; Returns: Json }
+      stripe_resolve: {
         Args: { p_academy: string; p_actor: string; p_subscription: string }
         Returns: undefined
       }

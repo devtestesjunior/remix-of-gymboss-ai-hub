@@ -1,3 +1,7 @@
+# Kiwify — histórico
+
+A venda de assinatura saiu da Kiwify. O checkout, o webhook e a revisão em Master passam a usar o Stripe. Este arquivo descreve a integração antiga, que permanece no código até o SQL do Stripe ser aplicado e a rota antiga ser retirada.
+
 # Kiwify — activation and review
 
 ## Endpoint and pending setup

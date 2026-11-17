@@ -1,5 +1,5 @@
 # Access architecture
-- Kiwify billing uses a signed public server route and service-only atomic RPCs; store normalized billing fields, never raw payloads, and quarantine unverified deliveries because Kiwify test webhooks are indistinguishable from real events.
+- Stripe billing uses a signed public server route and service-only atomic RPCs; store normalized billing fields, never raw payloads. A signed event with an academy id is applied directly. Deliveries without a single academy stay pending for Master review. Test and live events are separated by the webhook secret.
 - Billing protection uses a trigger-only fixed-path privileged read of OLD/NEW row identities; authorize the database-enforced caller role or UID-based super admin, never the definer's current_user or JWT role claims. Source-only SQL stays outside the managed migration journal until application is authorized.
 - Keep privileges in protected `public.user_roles`; browser navigation never grants permissions, because server-side RLS is authoritative.
 - Bootstrap the initial owner only from an explicitly selected, provider-verified identity; ordinary signup must never claim global administration.

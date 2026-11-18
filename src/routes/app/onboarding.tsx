@@ -164,7 +164,7 @@ function Onboarding() {
         {step === 4 && (<>
           <div className="text-center py-6">
             <h2 className="text-xl font-bold">Tudo pronto!</h2>
-            <p className="text-muted-foreground mt-2">Você terá 14 dias de trial gratuito.</p>
+            <p className="text-muted-foreground mt-2">A assinatura é cobrada no cartão desde a contratação. Não há período gratuito.</p>
           </div>
         </>)}
 

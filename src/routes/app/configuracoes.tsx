@@ -9,7 +9,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { useState } from "react";
 import { toast } from "sonner";
-import { fmtBRL, fmtDate } from "@/lib/format";
+import { fmtBRL } from "@/lib/format";
 import { useQuery } from "@tanstack/react-query";
 import { BookingLinkCard } from "@/components/booking-link-card";
 import { useServerFn } from "@tanstack/react-start";
@@ -84,8 +84,8 @@ function Config() {
           <div className="space-y-2">
             <div><strong>Plano atual:</strong> {saasPlans.find(plan => plan.code === a?.plano)?.name ?? a?.plano}</div>
             <div><strong>Status:</strong> {a?.status}</div>
-            <div><strong>Trial até:</strong> {fmtDate(a?.trial_ate)}</div>
             <div><strong>Valor mensal:</strong> {fmtBRL(a?.valor_mensal ?? 0)}</div>
+            <p className="text-muted-foreground">O acesso segue a fatura paga. A página de sucesso do Checkout não libera a academia.</p>
           </div>
           {canManage ? <div className="space-y-2">
             {saasPlans.map(plan => <div key={plan.code} className="flex items-center justify-between gap-3">

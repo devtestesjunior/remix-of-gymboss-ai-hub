@@ -138,7 +138,7 @@ BEGIN
    END IF;
  ELSIF reason IS NULL THEN reason:=CASE WHEN sid IS NULL THEN 'unresolved_charge' ELSE 'incomplete_subscription' END IF;
  END IF;
- IF p_event->>'event_type'='checkout_completed' AND reason IS NULL THEN reason:='binding_only'; END IF;
+ IF p_event->>'event_type' IN ('checkout_completed','subscription_created') AND reason IS NULL THEN reason:='binding_only'; END IF;
  IF reason='unknown_price' AND sid IS NOT NULL AND EXISTS(SELECT 1 FROM public.stripe_subscription WHERE id=sid AND plan IS NOT NULL AND price_id=p_event->>'price_id') THEN
    reason:=NULL; SELECT s2.plan INTO plan FROM public.stripe_subscription s2 WHERE s2.id=sid;
  END IF;
@@ -196,14 +196,15 @@ REVOKE ALL ON FUNCTION public.stripe_bind_customer(uuid,text,uuid) FROM PUBLIC,a
 GRANT EXECUTE ON FUNCTION public.stripe_bind_customer(uuid,text,uuid) TO service_role;
 
 CREATE FUNCTION public.stripe_access_allowed(p_academy uuid) RETURNS boolean LANGUAGE sql STABLE SECURITY DEFINER SET search_path='' AS $$
- SELECT public.is_super_admin() OR NOT EXISTS(SELECT 1 FROM public.stripe_subscription s WHERE s.academy_id=p_academy AND s.verified)
- OR EXISTS(SELECT 1 FROM public.stripe_subscription s WHERE s.academy_id=p_academy AND s.verified AND s.state<>'revoked' AND s.access_until>now());
+ SELECT public.is_super_admin() OR EXISTS(
+   SELECT 1 FROM public.stripe_subscription s
+   WHERE s.academy_id=p_academy AND s.verified AND s.state<>'revoked' AND s.access_until>now());
 $$;
 REVOKE ALL ON FUNCTION public.stripe_access_allowed(uuid) FROM PUBLIC,anon;
 GRANT EXECUTE ON FUNCTION public.stripe_access_allowed(uuid) TO authenticated,service_role;
 
 DO $$ DECLARE t text; BEGIN
- FOREACH t IN ARRAY ARRAY['student','plan','schedule','team_member','checkin','financial','lead'] LOOP
+ FOREACH t IN ARRAY ARRAY['student','schedule','team_member','checkin','financial','lead'] LOOP
   EXECUTE format('CREATE POLICY stripe_paid_access ON public.%I AS RESTRICTIVE FOR ALL TO authenticated USING (public.stripe_access_allowed(academy_id)) WITH CHECK (public.stripe_access_allowed(academy_id))',t);
  END LOOP;
 END $$;

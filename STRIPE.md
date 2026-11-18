@@ -18,7 +18,9 @@ Webhook de produção, depois que a rota estiver publicada:
 
 `https://gymboss-ai-command-center.lovable.app/api/public/stripe/webhook`
 
-Eventos: `checkout.session.completed`, `invoice.paid`, `invoice.payment_failed`, `customer.subscription.updated`, `customer.subscription.deleted`, `charge.refunded`, `charge.dispute.created`.
+Eventos: `checkout.session.completed`, `checkout.session.async_payment_succeeded`, `checkout.session.async_payment_failed`, `customer.subscription.created`, `customer.subscription.updated`, `customer.subscription.deleted`, `invoice.paid`, `invoice.payment_failed`, `invoice.payment_action_required`, `charge.refunded`, `charge.dispute.created`.
+
+Não há período gratuito. Checkout de assinatura cobra o cartão na contratação. Fatura zerada, status `trialing` ou valor diferente do plano na criação e na renovação não liberam acesso. A troca de plano no meio do ciclo pode ter valor proporcional. O acesso operacional passa a exigir uma assinatura confirmada com prazo pago; o catálogo de planos da academia continua editável antes disso.
 
 Sem o segredo do webhook a rota responde 503 e não grava nada.
 

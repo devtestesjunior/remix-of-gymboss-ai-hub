@@ -1,4 +1,3 @@
-import { differenceInDays, parseISO } from "date-fns";
 import { useTenant } from "@/lib/tenant-context";
 import { openStripeBilling } from "@/lib/stripe.functions";
 import { useServerFn } from "@tanstack/react-start";
@@ -25,22 +24,12 @@ export function TrialBanner() {
     );
   }
 
-  if (a.status === "trial" && a.trial_ate) {
-    const days = differenceInDays(parseISO(a.trial_ate), new Date());
-    if (days <= 3 && days >= 0) {
-      return (
-        <div className="bg-yellow-400 text-yellow-950 px-4 py-2 text-sm text-center">
-          Seu trial termina em {days} {days === 1 ? "dia" : "dias"}. <button type="button" className="underline font-medium" onClick={subscribe}>Assinar plano</button>
-        </div>
-      );
-    }
-    if (days < 0) {
-      return (
-        <div className="bg-orange-500 text-white px-4 py-2 text-sm text-center">
-          Trial expirado. <button type="button" className="underline font-medium" onClick={subscribe}>Assinar para continuar</button>
-        </div>
-      );
-    }
+  if (a.status === "trial") {
+    return (
+      <div className="bg-yellow-400 text-yellow-950 px-4 py-2 text-sm text-center">
+        A assinatura é paga desde a contratação. <button type="button" className="underline font-medium" onClick={subscribe}>Assinar plano</button>
+      </div>
+    );
   }
   return null;
 }

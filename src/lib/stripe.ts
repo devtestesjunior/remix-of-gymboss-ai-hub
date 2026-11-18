@@ -2,6 +2,7 @@ import { z } from "zod";
 
 export const saasPlans = ["starter", "pro", "premium"] as const;
 export type SaasPlan = (typeof saasPlans)[number];
+export const planAmounts = { starter: 9700, pro: 19700, premium: 39700 } as const;
 const priceEnv = { starter: "STRIPE_PRICE_STARTER", pro: "STRIPE_PRICE_PRO", premium: "STRIPE_PRICE_PREMIUM" } as const;
 const identifier = z.string().min(1).max(255).regex(/^[a-zA-Z0-9_]+$/);
 const uuid = z.string().uuid();
@@ -105,21 +106,31 @@ export function normalizeStripe(input: unknown, env: NodeJS.ProcessEnv = process
   const priceId = priceFrom(line) ?? priceFrom(item);
   const pricedPlan = planForPrice(priceId, env);
   const declaredPlan = metadataPlan(object) ?? metadataPlan(subscriptionDetails);
-  const plan = pricedPlan ?? (event.type === "checkout.session.completed" ? declaredPlan : null);
-  const accessUntil = periodEnd(line) ?? periodEnd(item) ?? periodEnd(object);
+  const checkoutBinding = event.type === "checkout.session.completed" || event.type === "checkout.session.async_payment_succeeded";
+  const plan = pricedPlan ?? (checkoutBinding ? declaredPlan : null);
+  const periodAccess = periodEnd(line) ?? periodEnd(item) ?? periodEnd(object);
   const invoiceId = event.type.startsWith("invoice.") ? id(object.id) : id(object.invoice);
   const chargeId = event.type === "charge.refunded" ? id(object.id) : id(object.charge);
   const mappedType = event.type === "invoice.paid" ? "invoice_paid"
-    : event.type === "invoice.payment_failed" ? "invoice_payment_failed"
+    : event.type === "invoice.payment_failed" || event.type === "invoice.payment_action_required" ? "invoice_payment_failed"
     : event.type === "charge.refunded" ? "charge_refunded"
     : event.type === "charge.dispute.created" ? "charge_disputed"
-    : event.type === "checkout.session.completed" ? "checkout_completed"
+    : event.type === "checkout.session.completed" || event.type === "checkout.session.async_payment_succeeded" || event.type === "checkout.session.async_payment_failed" ? "checkout_completed"
+    : event.type === "customer.subscription.created" ? "subscription_created"
     : event.type === "customer.subscription.deleted" ? "subscription_canceled"
-    : event.type === "customer.subscription.updated" ? (object.cancel_at_period_end === true || ["canceled", "unpaid", "incomplete_expired"].includes(String(object.status)) ? "subscription_canceled" : object.status === "past_due" ? "invoice_payment_failed" : null)
+    : event.type === "customer.subscription.updated" ? (object.status === "trialing" ? null : object.cancel_at_period_end === true || ["canceled", "unpaid", "incomplete_expired"].includes(String(object.status)) ? "subscription_canceled" : object.status === "past_due" ? "invoice_payment_failed" : null)
     : null;
-  const supported = mappedType !== null && (event.type !== "checkout.session.completed" || object.mode === "subscription");
-  const unpaidCheckout = mappedType === "checkout_completed" && object.payment_status !== "paid" && object.payment_status !== "no_payment_required";
+  const supported = mappedType !== null && (!event.type.startsWith("checkout.session.") || object.mode === "subscription");
+  const unpaidCheckout = event.type === "checkout.session.async_payment_failed" || (mappedType === "checkout_completed" && object.payment_status !== "paid");
+  const billingReason = text(object.billing_reason);
+  const fullPrice = pricedPlan ? planAmounts[pricedPlan] : null;
+  const recurringCharge = billingReason === null || billingReason === "subscription_create" || billingReason === "subscription_cycle";
   const currency = text(object.currency)?.toLowerCase() ?? null;
+  const amount = amountOf(object.amount_paid) ?? amountOf(object.amount_refunded) ?? amountOf(object.amount);
+  const deletedAt = unixIso(object.ended_at) ?? unixIso(event.created);
+  const accessUntil = event.type === "customer.subscription.deleted" ? deletedAt
+    : mappedType === "subscription_canceled" && (object.status === "unpaid" || object.status === "trialing") ? new Date(0).toISOString()
+    : periodAccess;
   return {
     identity: event.id,
     event_type: mappedType ?? event.type,
@@ -129,20 +140,22 @@ export function normalizeStripe(input: unknown, env: NodeJS.ProcessEnv = process
     academy_id: metadataAcademy(object) ?? metadataAcademy(subscriptionDetails),
     price_id: priceId,
     plan,
-    access_until: mappedType === "subscription_canceled" && object.status === "unpaid" ? new Date(0).toISOString() : accessUntil,
+    access_until: accessUntil,
     invoice_id: invoiceId,
     charge_id: chargeId,
     invoice_status: text(object.status),
-    amount: amountOf(object.amount_paid) ?? amountOf(object.amount_refunded) ?? amountOf(object.amount),
+    amount,
     currency,
     livemode: event.livemode,
-    reason: !supported ? "unsupported_event"
+    reason: !supported || object.status === "trialing" ? "unsupported_event"
       : unpaidCheckout ? "unpaid_checkout"
       : currency !== null && currency !== "brl" ? "invalid_currency"
       : pricedPlan && declaredPlan && pricedPlan !== declaredPlan ? "plan_mismatch"
       : mappedType === "invoice_paid" && !pricedPlan ? "unknown_price"
+      : mappedType === "invoice_paid" && (amount === null || amount === 0) ? "unpaid_invoice"
+      : mappedType === "invoice_paid" && recurringCharge && fullPrice !== null && amount !== fullPrice ? "amount_mismatch"
       : mappedType === "invoice_paid" && !accessUntil ? "invalid_period"
-      : (mappedType === "invoice_paid" || mappedType === "checkout_completed") && !subscriptionId ? "incomplete_subscription"
+      : (mappedType === "invoice_paid" || mappedType === "checkout_completed" || mappedType === "subscription_created") && !subscriptionId ? "incomplete_subscription"
       : null,
   };
 }

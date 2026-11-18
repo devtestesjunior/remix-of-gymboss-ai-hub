@@ -71,6 +71,22 @@ test("signature uses the raw body, rejects stale timestamps and missing secrets 
   assert.equal((await handleStripeWebhook(request(signed.value), secret, async () => { throw new Error("private"); })).status, 503);
 });
 
+test("paid invoices reject trials, zero amounts and a price that does not match the plan", () => {
+  assert.equal(normalizeStripe({ ...invoice, data: { object: { ...invoice.data.object, amount_paid: 0 } } }, env).reason, "unpaid_invoice");
+  assert.equal(normalizeStripe({ ...invoice, data: { object: { ...invoice.data.object, amount_paid: 100, billing_reason: "subscription_create" } } }, env).reason, "amount_mismatch");
+  assert.equal(normalizeStripe({ ...invoice, data: { object: { ...invoice.data.object, amount_paid: 5000, billing_reason: "subscription_update" } } }, env).reason, null);
+  const action = normalizeStripe({ ...invoice, id: "evt_action", type: "invoice.payment_action_required" }, env);
+  assert.equal(action.event_type, "invoice_payment_failed");
+  assert.equal(action.reason, null);
+  const trialing = normalizeStripe({ id: "evt_trial", type: "customer.subscription.created", livemode: false, data: { object: { id: "sub_1", customer: "cus_1", status: "trialing", metadata: { academy_id: "00000000-0000-4000-8000-000000000001", plan: "pro" } } } }, env);
+  assert.equal(trialing.reason, "unsupported_event");
+  const removed = normalizeStripe({ id: "evt_deleted", type: "customer.subscription.deleted", livemode: true, created: periodEnd, data: { object: { id: "sub_1", customer: "cus_1", status: "canceled", ended_at: periodEnd, current_period_end: periodEnd + 86400 } } }, env);
+  assert.equal(removed.event_type, "subscription_canceled");
+  assert.equal(removed.access_until, "2030-01-01T00:00:00.000Z");
+  const asyncFailed = normalizeStripe({ id: "evt_async", type: "checkout.session.async_payment_failed", livemode: false, data: { object: { id: "cs_2", mode: "subscription", payment_status: "unpaid", customer: "cus_1", subscription: "sub_1" } } }, env);
+  assert.equal(asyncFailed.reason, "unpaid_checkout");
+});
+
 test("billing origin stays on the request host unless an explicit https origin is configured", () => {
   assert.equal(billingOrigin("http://localhost:8080/app"), "http://localhost:8080");
   assert.equal(billingOrigin("https://gymboss-ai-command-center.lovable.app/api", "https://gymboss-ai-command-center.lovable.app"), "https://gymboss-ai-command-center.lovable.app");

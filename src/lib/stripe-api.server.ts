@@ -44,7 +44,7 @@ export async function createStripeCheckout(input: { academyId: string; plan: Saa
     locale: "pt-BR",
     "payment_method_types[0]": "card",
   });
-  const session = await stripeForm("checkout/sessions", body, `checkout-${input.academyId}-${input.plan}-${crypto.randomUUID()}`);
+  const session = await stripeForm("checkout/sessions", body, `checkout-${input.academyId}-${input.plan}`);
   if (!session.url?.startsWith("https://checkout.stripe.com/")) throw new Error("Billing unavailable");
   return session.url;
 }

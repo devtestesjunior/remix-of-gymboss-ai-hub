@@ -11,7 +11,7 @@ const prices = {
 const academyId = "00000000-0000-4000-8000-000000000001";
 const periodEnd = 1893456000;
 
-function invoice(priceId: string, declared?: string) {
+function invoice(priceId: string, declared?: string, amount = 9700) {
   return {
     id: "evt_plan",
     type: "invoice.paid",
@@ -22,8 +22,9 @@ function invoice(priceId: string, declared?: string) {
         customer: "cus_1",
         subscription: "sub_1",
         status: "paid",
-        amount_paid: 9700,
+        amount_paid: amount,
         currency: "brl",
+        billing_reason: "subscription_cycle",
         lines: { data: [{ price: { id: priceId }, period: { end: periodEnd } }] },
         subscription_details: { metadata: { academy_id: academyId, ...(declared ? { plan: declared } : {}) } },
       },
@@ -52,8 +53,8 @@ test("plan lookup rejects blank, padded and malformed price ids", () => {
 });
 
 test("a paid invoice takes the plan from its price, not from an unverified label", () => {
-  for (const [priceId, plan] of [["price_Start97", "starter"], ["price_Pro197", "pro"], ["price_Elite397", "premium"]] as const) {
-    const event = normalizeStripe(invoice(priceId), prices);
+  for (const [priceId, plan, amount] of [["price_Start97", "starter", 9700], ["price_Pro197", "pro", 19700], ["price_Elite397", "premium", 39700]] as const) {
+    const event = normalizeStripe(invoice(priceId, undefined, amount), prices);
     assert.equal(event.plan, plan);
     assert.equal(event.price_id, priceId);
     assert.equal(event.reason, null);
@@ -144,7 +145,9 @@ test("checkout and plan changes use the configured price without a Supabase key"
       assert.equal(body.get("metadata[plan]"), plan);
       assert.equal(body.get("subscription_data[metadata][plan]"), plan);
       assert.equal(body.get("metadata[academy_id]"), academyId);
-      assert.match(calls[index].idempotency ?? "", new RegExp(`^checkout-${academyId}-${plan}-`));
+      assert.equal(calls[index].idempotency, `checkout-${academyId}-${plan}`);
+      assert.equal(body.has("subscription_data[trial_period_days]"), false);
+      assert.equal(body.has("subscription_data[trial_end]"), false);
     });
 
     const portal = await createStripePortal("cus_1", "http://127.0.0.1:8080", { subscriptionId: "sub_1", itemId: "si_1", priceId: "price_Elite397" });

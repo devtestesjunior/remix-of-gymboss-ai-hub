@@ -32,7 +32,7 @@ Sem o segredo do webhook a rota responde 503 e não grava nada.
 
 ## Banco
 
-`database/staged/0007_stripe_billing.sql` não entrou no journal do Drizzle. Aplique uma vez, como dono da migration, dentro de uma transação. Não desligue o RLS, não conceda escrita a `anon` ou `authenticated` e não rode o script com o papel do navegador. Até a aplicação, o Checkout não consegue gravar o cliente nem liberar a academia.
+O Lovable Cloud aplica `drizzle/migrations/0006_stripe_billing.sql` pelo journal do Drizzle na publicação. Essa migration cria `stripe_customer`, `stripe_subscription`, `stripe_invoice` e `stripe_event`, as funções e o trigger de plano e status. Ela não fecha alunos, agenda, equipe, check-in, financeiro nem leads. Até essa publicação, o Checkout não consegue gravar o cliente nem liberar a academia.
 
 Uma academia tem uma assinatura confirmada por vez. Pagamento com `academy_id` libera sozinho. E-mail ambíguo ou academia ausente fica em **Master → Assinaturas**. Reembolso e disputa encerram o acesso e um replay não desfaz isso. Falha de cobrança mantém o prazo já pago. O portal entra no lugar de um segundo checkout enquanto o período está aberto.
 

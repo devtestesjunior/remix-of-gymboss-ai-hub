@@ -85,6 +85,15 @@ test("paid invoices reject trials, zero amounts and a price that does not match 
   assert.equal(removed.access_until, "2030-01-01T00:00:00.000Z");
   const asyncFailed = normalizeStripe({ id: "evt_async", type: "checkout.session.async_payment_failed", livemode: false, data: { object: { id: "cs_2", mode: "subscription", payment_status: "unpaid", customer: "cus_1", subscription: "sub_1" } } }, env);
   assert.equal(asyncFailed.reason, "unpaid_checkout");
+  const prorated = normalizeStripe({ ...invoice, data: { object: { id: "in_2", customer: "cus_1", customer_email: "owner@example.invalid", status: "paid", amount_paid: 5000, currency: "brl", billing_reason: "subscription_update", parent: { type: "subscription_details", subscription_details: { subscription: "sub_1", metadata: { academy_id: "00000000-0000-4000-8000-000000000001", plan: "pro" } } }, lines: { data: [{ amount: -14700, pricing: { price_details: { price: "price_pro" } }, period: { end: periodEnd } }, { amount: 19700, pricing: { price_details: { price: "price_elite" } }, period: { end: periodEnd } }] } } } }, env);
+  assert.equal(prorated.plan, "premium");
+  assert.equal(prorated.subscription_id, "sub_1");
+  assert.equal(prorated.price_id, "price_elite");
+  assert.equal(prorated.reason, null);
+  assert.equal(normalizeStripe({ ...invoice, data: { object: { ...invoice.data.object, amount_paid: 0, billing_reason: "subscription_update" } } }, env).reason, null);
+  const scheduled = normalizeStripe({ id: "evt_schedule", type: "customer.subscription.updated", livemode: false, data: { object: { id: "sub_1", customer: "cus_1", status: "active", cancel_at_period_end: true, items: { data: [{ id: "si_1", current_period_end: periodEnd, price: { id: "price_pro" } }] } } } }, env);
+  assert.equal(scheduled.event_type, "subscription_canceled");
+  assert.equal(scheduled.access_until, "2030-01-01T00:00:00.000Z");
 });
 
 test("billing origin stays on the request host unless an explicit https origin is configured", () => {

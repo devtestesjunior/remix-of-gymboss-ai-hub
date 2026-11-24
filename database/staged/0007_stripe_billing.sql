@@ -1,5 +1,9 @@
 -- SOURCE-ONLY: not registered in Drizzle's journal and NOT applied to the shared backend.
--- Apply through the managed migration tool only after separate deployment authorization.
+-- Apply once, as the migration owner, inside a single transaction. Do not SET row_security OFF,
+-- do not GRANT write access to anon or authenticated, and do not run it with the browser role.
+-- BEGIN;
+-- \i database/staged/0007_stripe_billing.sql
+-- COMMIT;
 CREATE TABLE public.stripe_customer (
  academy_id uuid PRIMARY KEY REFERENCES public.academy(id), customer_id text NOT NULL UNIQUE,
  created_at timestamptz NOT NULL DEFAULT now(),
@@ -24,6 +28,9 @@ GRANT SELECT ON public.stripe_subscription TO authenticated;
 GRANT ALL ON public.stripe_subscription TO service_role;
 ALTER TABLE public.stripe_subscription ENABLE ROW LEVEL SECURITY;
 CREATE POLICY stripe_subscription_master_read ON public.stripe_subscription FOR SELECT TO authenticated USING (public.is_super_admin());
+DROP POLICY IF EXISTS stripe_subscription_admin_read ON public.stripe_subscription;
+CREATE POLICY stripe_subscription_admin_read ON public.stripe_subscription FOR SELECT TO authenticated USING (
+ EXISTS (SELECT 1 FROM public.user_roles r WHERE r.user_id = auth.uid() AND r.role = 'admin' AND r.academy_id = stripe_subscription.academy_id));
 CREATE UNIQUE INDEX stripe_one_verified_subscription ON public.stripe_subscription(academy_id) WHERE verified;
 
 CREATE TABLE public.stripe_invoice (
@@ -71,8 +78,16 @@ BEGIN
    deadline:=now(); next_state:='revoked'; next_plan:=s.plan;
  ELSIF e.event_type='invoice_paid' THEN
    IF e.access_until IS NULL OR e.plan IS NULL THEN RETURN; END IF;
-   IF s.last_paid_until IS NOT NULL AND e.access_until<=s.last_paid_until THEN
+   IF s.last_paid_until IS NOT NULL AND e.access_until < s.last_paid_until THEN
      UPDATE public.stripe_event SET state='ignored',reason='stale_period' WHERE id=e.id; RETURN;
+   END IF;
+   IF s.last_paid_until IS NOT NULL AND e.access_until = s.last_paid_until THEN
+     UPDATE public.stripe_subscription SET plan=e.plan,price_id=CASE WHEN e.price_id IS NOT NULL THEN e.price_id ELSE price_id END,updated_at=now() WHERE id=s.id;
+     UPDATE public.academy SET plano=e.plan,valor_mensal=CASE e.plan WHEN 'starter' THEN 97 WHEN 'pro' THEN 197 WHEN 'premium' THEN 397 ELSE valor_mensal END,updated_at=now() WHERE id=s.academy_id;
+     UPDATE public.stripe_event SET state='applied',applied_at=now() WHERE id=e.id; RETURN;
+   END IF;
+   IF coalesce(e.amount,0)=0 THEN
+     UPDATE public.stripe_event SET state='ignored',reason='unpaid_invoice' WHERE id=e.id; RETURN;
    END IF;
    deadline:=greatest(s.access_until,e.access_until); next_state:='active'; next_plan:=e.plan;
  ELSIF e.event_type='invoice_payment_failed' THEN
@@ -87,7 +102,7 @@ BEGIN
    price_id=CASE WHEN e.event_type='invoice_paid' AND e.price_id IS NOT NULL THEN e.price_id ELSE price_id END,
    last_paid_until=CASE WHEN e.event_type='invoice_paid' THEN e.access_until ELSE last_paid_until END,
    updated_at=now() WHERE id=s.id;
- UPDATE public.academy SET plano=next_plan,
+ UPDATE public.academy SET plano=next_plan,valor_mensal=CASE next_plan WHEN 'starter' THEN 97 WHEN 'pro' THEN 197 WHEN 'premium' THEN 397 ELSE valor_mensal END,
    status=CASE WHEN deadline>now() AND next_state<>'revoked' THEN 'active'::public.academy_status ELSE 'blocked'::public.academy_status END,
    updated_at=now() WHERE id=s.academy_id AND next_plan IS NOT NULL;
  UPDATE public.stripe_event SET state='applied',applied_at=now() WHERE id=e.id;
@@ -98,7 +113,7 @@ GRANT EXECUTE ON FUNCTION public.stripe_apply_event(uuid) TO service_role;
 
 CREATE FUNCTION public.stripe_process_event(p_event jsonb) RETURNS jsonb LANGUAGE plpgsql SECURITY DEFINER SET search_path='' AS $$
 DECLARE sid text:=p_event->>'subscription_id'; mail text:=p_event->>'customer_email'; academy uuid:=nullif(p_event->>'academy_id','')::uuid;
- eid uuid; candidates uuid[]; target uuid; s public.stripe_subscription; reason text:=p_event->>'reason'; plan public.academy_plan:=NULL;
+ eid uuid; pending_id uuid; candidates uuid[]; target uuid; s public.stripe_subscription; reason text:=p_event->>'reason'; plan public.academy_plan:=NULL;
 BEGIN
  PERFORM pg_advisory_xact_lock(hashtextextended(coalesce(sid,p_event->>'invoice_id',p_event->>'charge_id',p_event->>'identity'),0));
  IF EXISTS(SELECT 1 FROM public.stripe_event WHERE identity=p_event->>'identity') THEN RETURN jsonb_build_object('duplicate',true); END IF;
@@ -154,6 +169,11 @@ BEGIN
    ON CONFLICT(id) DO UPDATE SET status=EXCLUDED.status,charge_id=coalesce(public.stripe_invoice.charge_id,EXCLUDED.charge_id),amount=coalesce(EXCLUDED.amount,public.stripe_invoice.amount);
  END IF;
  PERFORM public.stripe_apply_event(eid);
+ IF sid IS NOT NULL THEN
+   FOR pending_id IN SELECT id FROM public.stripe_event WHERE subscription_id=sid AND state='pending' AND reason IS NULL AND id<>eid
+    ORDER BY CASE event_type WHEN 'invoice_paid' THEN 0 WHEN 'invoice_payment_failed' THEN 1 WHEN 'subscription_canceled' THEN 2 ELSE 3 END, access_until NULLS LAST, received_at
+   LOOP PERFORM public.stripe_apply_event(pending_id); END LOOP;
+ END IF;
  RETURN jsonb_build_object('accepted',true);
 END;
 $$;
@@ -196,15 +216,18 @@ REVOKE ALL ON FUNCTION public.stripe_bind_customer(uuid,text,uuid) FROM PUBLIC,a
 GRANT EXECUTE ON FUNCTION public.stripe_bind_customer(uuid,text,uuid) TO service_role;
 
 CREATE FUNCTION public.stripe_access_allowed(p_academy uuid) RETURNS boolean LANGUAGE sql STABLE SECURITY DEFINER SET search_path='' AS $$
- SELECT public.is_super_admin() OR EXISTS(
-   SELECT 1 FROM public.stripe_subscription s
-   WHERE s.academy_id=p_academy AND s.verified AND s.state<>'revoked' AND s.access_until>now());
+ SELECT public.is_super_admin() OR (
+   EXISTS (SELECT 1 FROM public.user_roles r WHERE r.user_id = auth.uid() AND r.academy_id = p_academy)
+   AND EXISTS (
+     SELECT 1 FROM public.stripe_subscription s
+     WHERE s.academy_id = p_academy AND s.verified AND s.state <> 'revoked' AND s.access_until > now()));
 $$;
 REVOKE ALL ON FUNCTION public.stripe_access_allowed(uuid) FROM PUBLIC,anon;
 GRANT EXECUTE ON FUNCTION public.stripe_access_allowed(uuid) TO authenticated,service_role;
 
 DO $$ DECLARE t text; BEGIN
  FOREACH t IN ARRAY ARRAY['student','schedule','team_member','checkin','financial','lead'] LOOP
+  EXECUTE format('DROP POLICY IF EXISTS stripe_paid_access ON public.%I', t);
   EXECUTE format('CREATE POLICY stripe_paid_access ON public.%I AS RESTRICTIVE FOR ALL TO authenticated USING (public.stripe_access_allowed(academy_id)) WITH CHECK (public.stripe_access_allowed(academy_id))',t);
  END LOOP;
 END $$;
@@ -225,5 +248,6 @@ END;
 $$;
 REVOKE ALL ON FUNCTION public.stripe_protect_billing() FROM PUBLIC,anon,authenticated;
 GRANT EXECUTE ON FUNCTION public.stripe_protect_billing() TO service_role;
+DROP TRIGGER IF EXISTS stripe_billing_fields ON public.academy;
 CREATE TRIGGER stripe_billing_fields BEFORE UPDATE ON public.academy FOR EACH ROW EXECUTE FUNCTION public.stripe_protect_billing();
 COMMENT ON TABLE public.stripe_event IS 'Normalized signed Stripe fields only. No raw payload, signatures, card data or contact fields except customer email. Access changes come from invoice, cancellation, refund and dispute events.';

@@ -13,7 +13,12 @@ async function stripeForm(path: string, body: URLSearchParams, idempotencyKey: s
   const payload: unknown = await response.json().catch(() => null);
   const id = typeof payload === "object" && payload && "id" in payload && typeof payload.id === "string" ? payload.id : null;
   const url = typeof payload === "object" && payload && "url" in payload && typeof payload.url === "string" ? payload.url : null;
-  if (!response.ok || !id) throw new Error("Billing unavailable");
+  if (!response.ok || !id) {
+    const error = typeof payload === "object" && payload && "error" in payload ? payload.error : null;
+    const code = typeof error === "object" && error && "code" in error ? error.code : "unknown";
+    console.error("[stripe] request failed", path, response.status, code);
+    throw new Error("Billing unavailable");
+  }
   return { id, url };
 }
 
@@ -79,6 +84,7 @@ async function gymspotterPortalConfiguration() {
     if (!product) throw new Error("Billing unavailable");
     body.set(`features[subscription_update][products][${index}][product]`, product);
     body.set(`features[subscription_update][products][${index}][prices][0]`, price);
+    body.set(`features[subscription_update][products][${index}][adjustable_quantity][enabled]`, "false");
   }
   const created = await stripeForm("billing_portal/configurations", body, "gymspotter-portal-configuration");
   if (!/^bpc_[A-Za-z0-9]+$/.test(created.id)) throw new Error("Billing unavailable");

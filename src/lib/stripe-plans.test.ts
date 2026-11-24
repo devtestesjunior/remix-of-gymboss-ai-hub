@@ -106,20 +106,22 @@ test("checkout can remember a selected plan and a paid invoice can confirm it", 
 });
 
 test("checkout and plan changes use the configured price without a Supabase key", async () => {
-  const calls: { url: string; body: string; idempotency: string | null }[] = [];
+  const calls: { url: string; body: string; idempotency: string | null; authorization: string | null }[] = [];
   const originalFetch = globalThis.fetch;
   const previousKey = process.env.STRIPE_SECRET_KEY;
+  const previousServiceRole = process.env.SUPABASE_SERVICE_ROLE_KEY;
   const previousPrices = {
     STRIPE_PRICE_STARTER: process.env.STRIPE_PRICE_STARTER,
     STRIPE_PRICE_PRO: process.env.STRIPE_PRICE_PRO,
     STRIPE_PRICE_PREMIUM: process.env.STRIPE_PRICE_PREMIUM,
   };
+  delete process.env.SUPABASE_SERVICE_ROLE_KEY;
   process.env.STRIPE_SECRET_KEY = "sk_test_plans_only";
   Object.assign(process.env, prices);
   globalThis.fetch = async (input, init) => {
     const url = String(input);
     const headers = new Headers(init?.headers);
-    calls.push({ url, body: String(init?.body ?? ""), idempotency: headers.get("Idempotency-Key") });
+    calls.push({ url, body: String(init?.body ?? ""), idempotency: headers.get("Idempotency-Key"), authorization: headers.get("Authorization") });
     if (url.includes("/v1/prices/")) {
       const priceId = url.split("/").pop();
       return new Response(JSON.stringify({ id: priceId, product: `prod_${priceId}` }), { status: 200 });
@@ -156,13 +158,18 @@ test("checkout and plan changes use the configured price without a Supabase key"
     assert.equal(configuration.get("features[subscription_update][products][0][prices][0]"), "price_Start97");
     assert.equal(configuration.get("features[subscription_update][products][1][prices][0]"), "price_Pro197");
     assert.equal(configuration.get("features[subscription_update][products][2][prices][0]"), "price_Elite397");
+    assert.equal(configuration.get("features[subscription_update][products][0][adjustable_quantity][enabled]"), "false");
     const session = new URLSearchParams(calls.find(call => call.url.endsWith("/v1/billing_portal/sessions"))?.body);
     assert.equal(session.get("flow_data[subscription_update_confirm][items][0][price]"), "price_Elite397");
     assert.equal(process.env.SUPABASE_SERVICE_ROLE_KEY, undefined);
+    assert.ok(calls.length > 0);
+    for (const call of calls) assert.equal(call.authorization, "Bearer sk_test_plans_only");
   } finally {
     globalThis.fetch = originalFetch;
     if (previousKey === undefined) delete process.env.STRIPE_SECRET_KEY;
     else process.env.STRIPE_SECRET_KEY = previousKey;
+    if (previousServiceRole === undefined) delete process.env.SUPABASE_SERVICE_ROLE_KEY;
+    else process.env.SUPABASE_SERVICE_ROLE_KEY = previousServiceRole;
     for (const [key, value] of Object.entries(previousPrices)) {
       if (value === undefined) delete process.env[key];
       else process.env[key] = value;

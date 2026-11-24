@@ -20,9 +20,15 @@ export const openStripeBilling = createServerFn({ method: "POST" })
     const { originFromRequest, createStripeCustomer, createStripeCheckout, createStripePortal, stripeSubscriptionItem } = await import("./stripe-api.server");
     const origin = originFromRequest(getRequest());
     const { data: subscription, error: subscriptionError } = await supabaseAdmin.from("stripe_subscription").select("id,state,access_until,verified").eq("academy_id", data.academyId).eq("verified", true).maybeSingle();
-    if (subscriptionError) throw new Error("A cobrança ainda não está disponível.");
+    if (subscriptionError) {
+      console.error("[stripe] subscription lookup failed", subscriptionError.code);
+      throw new Error(subscriptionError.code === "PGRST205" ? "A cobrança ainda não foi instalada no banco." : "A cobrança ainda não está disponível.");
+    }
     const { data: customer, error: customerError } = await supabaseAdmin.from("stripe_customer").select("customer_id").eq("academy_id", data.academyId).maybeSingle();
-    if (customerError) throw new Error("A cobrança ainda não está disponível.");
+    if (customerError) {
+      console.error("[stripe] customer lookup failed", customerError.code);
+      throw new Error(customerError.code === "PGRST205" ? "A cobrança ainda não foi instalada no banco." : "A cobrança ainda não está disponível.");
+    }
     const stillOpen = !!subscription && subscription.state !== "revoked" && (subscription.state === "active" || subscription.state === "late" || (!!subscription.access_until && new Date(subscription.access_until).getTime() > Date.now()));
     if (customer?.customer_id && (data.intent === "manage" || stillOpen)) {
       const price = priceIdForPlan(data.plan);

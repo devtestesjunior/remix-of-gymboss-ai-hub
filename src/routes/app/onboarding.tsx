@@ -91,9 +91,9 @@ function Onboarding() {
       toast.success("Academia criada!");
       const plano = currentSaasPlan();
       if (plano) {
-        forgetSaasPlan();
         try {
           const billing = await openBilling({ data: { academyId: result.data.academyId, plan: plano, intent: "subscribe" } });
+          forgetSaasPlan();
           window.location.assign(billing.url);
           return;
         } catch {

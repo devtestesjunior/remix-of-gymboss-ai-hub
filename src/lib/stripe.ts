@@ -70,6 +70,9 @@ function unixIso(value: unknown) {
 function amountOf(value: unknown) {
   return typeof value === "number" && Number.isInteger(value) && value >= 0 && value <= 100_000_000 ? value : null;
 }
+function signedAmount(value: unknown) {
+  return typeof value === "number" && Number.isInteger(value) && Math.abs(value) <= 100_000_000 ? value : null;
+}
 function record(value: unknown) {
   return typeof value === "object" && value !== null && !Array.isArray(value) ? value as Record<string, unknown> : null;
 }
@@ -92,12 +95,23 @@ function periodEnd(source: Record<string, unknown> | null) {
   const period = record(source?.period);
   return unixIso(source?.current_period_end) ?? unixIso(period?.end);
 }
+function billingLine(object: Record<string, unknown>, env: NodeJS.ProcessEnv) {
+  const lines = record(object.lines);
+  const parsed = Array.isArray(lines?.data) ? lines.data.flatMap(entry => {
+    const line = record(entry);
+    return line ? [line] : [];
+  }) : [];
+  if (!parsed.length) return null;
+  const ranked = parsed.map(line => ({ line, amount: signedAmount(line.amount) ?? Number.NEGATIVE_INFINITY, known: planForPrice(priceFrom(line), env) !== null }));
+  const known = ranked.filter(item => item.known);
+  const pool = known.length > 0 ? known : ranked;
+  return pool.reduce((best, item) => item.amount > best.amount ? item : best).line;
+}
 
 export function normalizeStripe(input: unknown, env: NodeJS.ProcessEnv = process.env) {
   const event = stripeEvent.parse(input);
   const object = event.data.object;
-  const lines = record(object.lines);
-  const line = Array.isArray(lines?.data) ? record(lines.data[0]) : null;
+  const line = billingLine(object, env);
   const items = record(object.items);
   const item = Array.isArray(items?.data) ? record(items.data[0]) : null;
   const subscriptionDetails = record(object.subscription_details) ?? record(record(object.parent)?.subscription_details);
@@ -150,9 +164,9 @@ export function normalizeStripe(input: unknown, env: NodeJS.ProcessEnv = process
     reason: !supported || object.status === "trialing" ? "unsupported_event"
       : unpaidCheckout ? "unpaid_checkout"
       : currency !== null && currency !== "brl" ? "invalid_currency"
-      : pricedPlan && declaredPlan && pricedPlan !== declaredPlan ? "plan_mismatch"
+      : pricedPlan && declaredPlan && pricedPlan !== declaredPlan && billingReason !== "subscription_update" ? "plan_mismatch"
       : mappedType === "invoice_paid" && !pricedPlan ? "unknown_price"
-      : mappedType === "invoice_paid" && (amount === null || amount === 0) ? "unpaid_invoice"
+      : mappedType === "invoice_paid" && (amount === null || amount === 0) && billingReason !== "subscription_update" ? "unpaid_invoice"
       : mappedType === "invoice_paid" && recurringCharge && fullPrice !== null && amount !== fullPrice ? "amount_mismatch"
       : mappedType === "invoice_paid" && !accessUntil ? "invalid_period"
       : (mappedType === "invoice_paid" || mappedType === "checkout_completed" || mappedType === "subscription_created") && !subscriptionId ? "incomplete_subscription"

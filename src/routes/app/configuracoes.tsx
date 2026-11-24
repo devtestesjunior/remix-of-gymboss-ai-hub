@@ -9,7 +9,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { useState } from "react";
 import { toast } from "sonner";
-import { fmtBRL } from "@/lib/format";
+import { fmtBRL, fmtDateTime } from "@/lib/format";
 import { useQuery } from "@tanstack/react-query";
 import { BookingLinkCard } from "@/components/booking-link-card";
 import { useServerFn } from "@tanstack/react-start";
@@ -18,11 +18,14 @@ import type { SaasPlan } from "@/lib/stripe";
 
 export const Route = createFileRoute("/app/configuracoes")({ component: Config, head: () => ({ meta: [{"title": "Configurações · Academia | Gym Spotter"}, {"name": "description", "content": "Configurações — Gym Spotter, gestão de academias."}, {"property": "og:title", "content": "Configurações · Academia | Gym Spotter"}, {"property": "og:description", "content": "Configurações — Gym Spotter, gestão de academias."}, {"property": "og:type", "content": "website"}, {"name": "twitter:card", "content": "summary"}] }) });
 
-const saasPlans: { code: SaasPlan; name: string; amount: string }[] = [
-  { code: "starter", name: "Start", amount: "R$ 97" },
-  { code: "pro", name: "Pro", amount: "R$ 197" },
-  { code: "premium", name: "Elite", amount: "R$ 397" },
+const saasPlans: { code: SaasPlan; name: string; amount: string; price: number }[] = [
+  { code: "starter", name: "Start", amount: "R$ 97", price: 97 },
+  { code: "pro", name: "Pro", amount: "R$ 197", price: 197 },
+  { code: "premium", name: "Elite", amount: "R$ 397", price: 397 },
 ];
+const subscriptionState: Record<string, string> = {
+  pending: "Aguardando pagamento", active: "Ativa", late: "Pagamento recusado", canceled: "Cancelada", revoked: "Revogada",
+};
 
 function Config() {
   const { tenant, refetch } = useTenant();
@@ -41,7 +44,17 @@ function Config() {
     },
   });
 
-  const currentPlan: SaasPlan = a?.plano === "starter" || a?.plano === "premium" ? a.plano : "pro";
+  const currentPlan: SaasPlan = a?.plano === "starter" || a?.plano === "pro" || a?.plano === "premium" ? a.plano : "pro";
+  const subscribed = a?.status === "active";
+  const { data: subscription } = useQuery({
+    queryKey: ["stripe-subscription", tenant?.academyId],
+    enabled: !!tenant?.academyId,
+    queryFn: async () => {
+      const { data, error } = await supabase.from("stripe_subscription").select("state,access_until,plan").eq("academy_id", tenant!.academyId!).eq("verified", true).maybeSingle();
+      if (error) return null;
+      return data;
+    },
+  });
   const canManage = tenant?.role === "admin";
   const startBilling = async (plan: SaasPlan, intent: "manage" | "subscribe") => {
     if (!tenant?.academyId || !canManage) return;
@@ -84,13 +97,15 @@ function Config() {
           <div className="space-y-2">
             <div><strong>Plano atual:</strong> {saasPlans.find(plan => plan.code === a?.plano)?.name ?? a?.plano}</div>
             <div><strong>Status:</strong> {a?.status}</div>
-            <div><strong>Valor mensal:</strong> {fmtBRL(a?.valor_mensal ?? 0)}</div>
-            <p className="text-muted-foreground">O acesso segue a fatura paga. A página de sucesso do Checkout não libera a academia.</p>
+            <div><strong>Valor mensal:</strong> {fmtBRL(saasPlans.find(plan => plan.code === a?.plano)?.price ?? 0)}</div>
+            {subscription?.state && <div><strong>Assinatura:</strong> {subscriptionState[subscription.state] ?? subscription.state}</div>}
+            {subscription?.access_until && <div><strong>Acesso até:</strong> {fmtDateTime(subscription.access_until)}</div>}
+            <p className="text-muted-foreground">O acesso segue a fatura paga. A página de sucesso do Checkout não libera a academia. O cancelamento encerra a renovação e mantém o acesso até o fim do período já pago.</p>
           </div>
           {canManage ? <div className="space-y-2">
             {saasPlans.map(plan => <div key={plan.code} className="flex items-center justify-between gap-3">
               <span>{plan.name} · {plan.amount}/mês</span>
-              {plan.code === currentPlan ? <span className="text-muted-foreground">Plano atual</span> : <Button type="button" variant="outline" size="sm" disabled={billing !== null} onClick={() => { void startBilling(plan.code, "subscribe"); }}>{billing === plan.code ? "Abrindo…" : `Mudar para ${plan.name}`}</Button>}
+              {plan.code === currentPlan && subscribed ? <span className="text-muted-foreground">Plano atual</span> : <Button type="button" variant="outline" size="sm" disabled={billing !== null} onClick={() => { void startBilling(plan.code, "subscribe"); }}>{billing === plan.code ? "Abrindo…" : subscribed ? `Mudar para ${plan.name}` : `Assinar ${plan.name}`}</Button>}
             </div>)}
             <Button type="button" disabled={billing !== null} onClick={() => { void startBilling(currentPlan, "manage"); }}>{billing === "manage" ? "Abrindo…" : "Gerenciar cartão, faturas e cancelamento"}</Button>
           </div> : <p className="text-muted-foreground">A gestão da assinatura é do administrador da academia.</p>}

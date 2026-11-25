@@ -6,10 +6,9 @@ export const Route = createFileRoute("/api/public/stripe/webhook")({
     return handleStripeWebhook(request, process.env.STRIPE_WEBHOOK_SECRET, async event => {
       const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
       const { error } = await supabaseAdmin.rpc("stripe_process_event", { p_event: event });
-      if (error) {
-        console.error("[stripe] webhook event was not stored", error.code ?? "unknown");
-        throw new Error("Billing processing failed");
-      }
+      if (error) console.error("[stripe] webhook event was not stored", error.code ?? "unknown");
+      const { confirmPaidInvoice } = await import("@/lib/stripe-reconcile.server");
+      await confirmPaidInvoice(supabaseAdmin, event);
     });
   } } },
 });

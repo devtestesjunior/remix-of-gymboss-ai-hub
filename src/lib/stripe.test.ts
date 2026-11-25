@@ -2,7 +2,7 @@ import { createHmac } from "node:crypto";
 import { test } from "node:test";
 import { strict as assert } from "node:assert";
 import { billingOrigin, normalizeStripe, planForPrice, priceIdForPlan } from "./stripe";
-import { handleStripeWebhook, validStripeSignature } from "./stripe-webhook.server";
+import { handleStripeWebhook, stripeSignatureMaxAgeMs, validStripeSignature } from "./stripe-webhook.server";
 
 const secret = "whsec_test_secret";
 const env = { STRIPE_PRICE_STARTER: "price_start", STRIPE_PRICE_PRO: "price_pro", STRIPE_PRICE_PREMIUM: "price_elite" };
@@ -60,7 +60,8 @@ test("signature uses the raw body, rejects stale timestamps and missing secrets 
   const signed = header(body);
   assert.equal(validStripeSignature(new TextEncoder().encode(body), signed.value, secret, signed.timestamp * 1000), true);
   assert.equal(validStripeSignature(new TextEncoder().encode(body + " "), signed.value, secret, signed.timestamp * 1000), false);
-  assert.equal(validStripeSignature(new TextEncoder().encode(body), signed.value, secret, signed.timestamp * 1000 + 300_001), false);
+  assert.equal(validStripeSignature(new TextEncoder().encode(body), signed.value, secret, signed.timestamp * 1000 + 600_000), true);
+  assert.equal(validStripeSignature(new TextEncoder().encode(body), signed.value, secret, signed.timestamp * 1000 + stripeSignatureMaxAgeMs + 1000), false);
   let calls = 0;
   const request = (signature: string, payload = body) => new Request("https://gymboss-ai-command-center.lovable.app/api/public/stripe/webhook", { method: "POST", headers: { "content-type": "application/json", "stripe-signature": signature }, body: payload });
   assert.equal((await handleStripeWebhook(request(signed.value), undefined, async () => { calls++; })).status, 503);

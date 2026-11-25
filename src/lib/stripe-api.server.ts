@@ -91,6 +91,35 @@ async function gymspotterPortalConfiguration() {
   portalConfiguration = created.id;
   return created.id;
 }
+export async function listPaidInvoiceEvents() {
+  const payload = await stripeGet("events?type=invoice.paid&limit=20");
+  return Array.isArray(payload.data) ? payload.data : [];
+}
+
+export async function openCustomerSubscription(customerId: string) {
+  if (!/^cus_[A-Za-z0-9]+$/.test(customerId)) throw new Error("Billing unavailable");
+  const payload = await stripeGet(`subscriptions?customer=${customerId}&status=all&limit=10`);
+  const rows = Array.isArray(payload.data) ? payload.data as Record<string, unknown>[] : [];
+  const open = rows.find(row => ["active", "past_due", "unpaid", "incomplete"].includes(String(row.status)));
+  if (!open || typeof open.id !== "string" || !/^sub_[A-Za-z0-9]+$/.test(open.id)) return null;
+  const items = open.items as { data?: { id?: string }[] } | undefined;
+  const itemId = items?.data?.[0]?.id;
+  return { subscriptionId: open.id, itemId: itemId && /^si_[A-Za-z0-9]+$/.test(itemId) ? itemId : null };
+}
+
+export async function cancelOtherActiveSubscriptions(customerId: string, keepSubscriptionId: string) {
+  if (!/^cus_[A-Za-z0-9]+$/.test(customerId) || !/^sub_[A-Za-z0-9]+$/.test(keepSubscriptionId)) throw new Error("Billing unavailable");
+  const key = process.env.STRIPE_SECRET_KEY?.trim();
+  if (!key) throw new Error("Billing unavailable");
+  const payload = await stripeGet(`subscriptions?customer=${customerId}&status=active&limit=10`);
+  const rows = Array.isArray(payload.data) ? payload.data as { id?: string }[] : [];
+  for (const row of rows) {
+    if (!row.id || row.id === keepSubscriptionId || !/^sub_[A-Za-z0-9]+$/.test(row.id)) continue;
+    const response = await fetch(`https://api.stripe.com/v1/subscriptions/${row.id}`, { method: "DELETE", headers: { Authorization: `Bearer ${key}` } });
+    if (!response.ok && response.status !== 404) console.error("[stripe] older subscription was not canceled", response.status);
+  }
+}
+
 export async function stripeSubscriptionItem(subscriptionId: string) {
   if (!/^sub_[A-Za-z0-9]+$/.test(subscriptionId)) throw new Error("Billing unavailable");
   const payload = await stripeGet(`subscriptions/${subscriptionId}`);

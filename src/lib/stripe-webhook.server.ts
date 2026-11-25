@@ -1,13 +1,15 @@
 import { createHmac, timingSafeEqual } from "node:crypto";
 import { normalizeStripe, type StripeBillingEvent } from "./stripe";
 
+export const stripeSignatureMaxAgeMs = 3 * 24 * 60 * 60 * 1000;
+
 export function validStripeSignature(body: Uint8Array, header: string | null, secret: string, now = Date.now()) {
   if (!secret || !header) return false;
   const parts = header.split(",").map(part => part.trim());
   const timestamp = parts.find(part => part.startsWith("t="))?.slice(2);
   const signatures = parts.filter(part => part.startsWith("v1=")).map(part => part.slice(3));
   if (!timestamp || !/^\d{1,12}$/.test(timestamp) || signatures.length === 0 || signatures.length > 5) return false;
-  if (Math.abs(now - Number(timestamp) * 1000) > 300_000) return false;
+  if (Math.abs(now - Number(timestamp) * 1000) > stripeSignatureMaxAgeMs) return false;
   const expected = createHmac("sha256", secret).update(Buffer.concat([Buffer.from(`${timestamp}.`), Buffer.from(body)])).digest();
   return signatures.some(signature => /^[a-f0-9]{64}$/.test(signature) && timingSafeEqual(expected, Buffer.from(signature, "hex")));
 }

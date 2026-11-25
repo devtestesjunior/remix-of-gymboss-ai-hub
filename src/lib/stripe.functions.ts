@@ -2,7 +2,7 @@ import { createServerFn } from "@tanstack/react-start";
 import { getRequest } from "@tanstack/react-start/server";
 import { z } from "zod";
 import { requireSupabaseAuth } from "@/integrations/supabase/auth-middleware";
-import { priceIdForPlan, saasPlans } from "./stripe";
+import { normalizeStripe, priceIdForPlan, saasPlans } from "./stripe";
 
 const input = z.object({ academyId: z.string().uuid(), plan: z.enum(saasPlans), intent: z.enum(["manage", "subscribe"]) }).strict();
 
@@ -17,7 +17,7 @@ export const openStripeBilling = createServerFn({ method: "POST" })
     const email = academy?.owner_email?.trim().toLowerCase();
     if (academyError || !email) throw new Error("Não foi possível identificar a academia.");
     const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
-    const { originFromRequest, createStripeCustomer, createStripeCheckout, createStripePortal, stripeSubscriptionItem } = await import("./stripe-api.server");
+    const { originFromRequest, createStripeCustomer, createStripeCheckout, createStripePortal, stripeSubscriptionItem, openCustomerSubscription } = await import("./stripe-api.server");
     const origin = originFromRequest(getRequest());
     const { data: subscription, error: subscriptionError } = await supabaseAdmin.from("stripe_subscription").select("id,state,access_until,verified").eq("academy_id", data.academyId).eq("verified", true).maybeSingle();
     if (subscriptionError) {
@@ -42,10 +42,42 @@ export const openStripeBilling = createServerFn({ method: "POST" })
       }
       return { url: await createStripePortal(customer.customer_id, origin) };
     }
+    if (customer?.customer_id && data.intent === "subscribe") {
+      const live = await openCustomerSubscription(customer.customer_id);
+      const price = priceIdForPlan(data.plan);
+      if (live?.itemId && price) return { url: await createStripePortal(customer.customer_id, origin, { subscriptionId: live.subscriptionId, itemId: live.itemId, priceId: price }) };
+      if (live) return { url: await createStripePortal(customer.customer_id, origin) };
+    }
     const customerId = customer?.customer_id ?? await createStripeCustomer(data.academyId, email);
     const { data: bound, error: bindError } = await supabaseAdmin.rpc("stripe_bind_customer", { p_academy: data.academyId, p_customer: customerId, p_actor: context.userId });
     if (bindError || !bound) throw new Error("Não foi possível preparar a cobrança.");
     return { url: await createStripeCheckout({ academyId: data.academyId, plan: data.plan, customerId: bound, origin }) };
+  });
+
+export const syncStripeBilling = createServerFn({ method: "POST" })
+  .middleware([requireSupabaseAuth])
+  .inputValidator((value: unknown) => z.object({ academyId: z.string().uuid() }).strict().parse(value))
+  .handler(async ({ data, context }) => {
+    const { data: roles, error: roleError } = await context.supabase.from("user_roles").select("role,academy_id").eq("user_id", context.userId);
+    if (roleError || !roles?.some(role => role.academy_id === data.academyId && role.role === "admin")) return { updated: false };
+    const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
+    const { listPaidInvoiceEvents, cancelOtherActiveSubscriptions } = await import("./stripe-api.server");
+    const { confirmPaidInvoice } = await import("./stripe-reconcile.server");
+    const paid = (await listPaidInvoiceEvents()).flatMap(item => {
+      try {
+        const event = normalizeStripe(item);
+        const created = typeof item === "object" && item && "created" in item && typeof item.created === "number" ? item.created : 0;
+        return event.academy_id === data.academyId && event.event_type === "invoice_paid" && !event.reason ? [{ event, created }] : [];
+      } catch { return []; }
+    }).sort((left, right) => left.created - right.created);
+    for (const item of paid) {
+      const { error } = await supabaseAdmin.rpc("stripe_process_event", { p_event: item.event });
+      if (error) console.error("[stripe] paid invoice was not applied", error.code ?? "unknown");
+      await confirmPaidInvoice(supabaseAdmin, item.event);
+    }
+    const winner = paid.at(-1)?.event;
+    if (winner?.customer_id && winner.subscription_id) await cancelOtherActiveSubscriptions(winner.customer_id, winner.subscription_id);
+    return { updated: paid.length > 0 };
   });
 
 export const resolveStripeSubscription = createServerFn({ method: "POST" })

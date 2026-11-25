@@ -7,13 +7,13 @@ import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { toast } from "sonner";
 import { fmtBRL, fmtDateTime } from "@/lib/format";
-import { useQuery } from "@tanstack/react-query";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { BookingLinkCard } from "@/components/booking-link-card";
 import { useServerFn } from "@tanstack/react-start";
-import { openStripeBilling } from "@/lib/stripe.functions";
+import { openStripeBilling, syncStripeBilling } from "@/lib/stripe.functions";
 import type { SaasPlan } from "@/lib/stripe";
 
 export const Route = createFileRoute("/app/configuracoes")({ component: Config, head: () => ({ meta: [{"title": "Configurações · Academia | Gym Spotter"}, {"name": "description", "content": "Configurações — Gym Spotter, gestão de academias."}, {"property": "og:title", "content": "Configurações · Academia | Gym Spotter"}, {"property": "og:description", "content": "Configurações — Gym Spotter, gestão de academias."}, {"property": "og:type", "content": "website"}, {"name": "twitter:card", "content": "summary"}] }) });
@@ -31,6 +31,8 @@ function Config() {
   const { tenant, refetch } = useTenant();
   const a = tenant?.academy;
   const openBilling = useServerFn(openStripeBilling);
+  const syncBilling = useServerFn(syncStripeBilling);
+  const queryClient = useQueryClient();
   const [billing, setBilling] = useState<SaasPlan | "manage" | null>(null);
   const aba = useRouterState({ select: s => new URLSearchParams(s.location.searchStr).get("aba") });
   const [tab, setTab] = useState(aba === "cobranca" ? "cobranca" : "academia");
@@ -56,6 +58,16 @@ function Config() {
     },
   });
   const canManage = tenant?.role === "admin";
+  useEffect(() => {
+    if (tab !== "cobranca" || !tenant?.academyId || !canManage) return;
+    let active = true;
+    void syncBilling({ data: { academyId: tenant.academyId } }).then(() => {
+      if (!active) return;
+      void refetch();
+      void queryClient.invalidateQueries({ queryKey: ["stripe-subscription", tenant.academyId] });
+    }).catch(() => { if (active) toast.error("Não foi possível atualizar a assinatura."); });
+    return () => { active = false; };
+  }, [tab, tenant?.academyId, canManage, syncBilling, refetch, queryClient]);
   const startBilling = async (plan: SaasPlan, intent: "manage" | "subscribe") => {
     if (!tenant?.academyId || !canManage) return;
     setBilling(intent === "manage" ? "manage" : plan);
